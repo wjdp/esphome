@@ -1,0 +1,55 @@
+esphome:
+  name: d1_lcd
+  platform: ESP8266
+  board: d1_mini
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: d1_lcd.pimblett.me.uk
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  password: !secret api_password
+
+ota:
+  password: !secret ota_password
+
+i2c:
+  sda: D2
+  scl: D1
+
+time:
+  - platform: sntp
+    id: ntp
+    servers:
+      - ntp.pimblett.me.uk
+
+sensor:
+  - platform: homeassistant
+    id: bedroom_temperature
+    entity_id: sensor.bedroom_temperature
+    internal: true
+
+  - platform: homeassistant
+    id: bedroom_humidity
+    entity_id: sensor.bedroom_humidity
+    internal: true
+
+display:
+  - platform: lcd_pcf8574
+    dimensions: 16x2
+    address: 0x27
+    lambda: |-
+      it.strftime(0, 0, "%Y-%m-%d %H:%M", id(ntp).now());
+      if (id(bedroom_temperature).has_state()) {
+        it.printf(0, 1, "%gC", id(bedroom_temperature).state);
+      }
+
+      if (id(bedroom_humidity).has_state()) {
+        it.printf(6, 1, "%gH", id(bedroom_humidity).state);
+      }
+
