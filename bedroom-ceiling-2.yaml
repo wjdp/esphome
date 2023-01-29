@@ -1,0 +1,46 @@
+esphome:
+  name: bedroom-ceiling-2
+  board: esp8285
+  platform: ESP8266
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: bedroom-ceiling-2.pimblett.me.uk
+
+# Enable Home Assistant API
+api:
+  password: !secret api_password
+
+ota:
+  password: !secret ota_password
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: GPIO0
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Sonoff onboard switch"
+    on_press:
+      - switch.toggle: relay
+  - platform: gpio
+    pin:
+      number: GPIO14
+      mode: INPUT_PULLUP
+      inverted: True
+    name: "Bed wall push switch"
+
+switch:
+  - platform: gpio
+    name: "Bedroom Ceiling 2 Relay"
+    pin: GPIO12
+    id: relay
+
+status_led:
+  pin:
+    number: GPIO13
+    inverted: yes
+
+logger:
+  level: DEBUG
