@@ -1,12 +1,12 @@
 esphome:
-  name: bedroom-ceiling-1
-  board: esp8285
+  name: lane-upper-flood
   platform: ESP8266
+  board: esp8285
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
-  use_address: bedroom-ceiling-1.pimblett.me.uk
+  use_address: lane-upper-flood.pimblett.me.uk
 
 # Enable Home Assistant API
 api:
@@ -26,19 +26,18 @@ binary_sensor:
       inverted: True
     name: "Sonoff onboard switch"
     on_press:
-      - switch.toggle: relay
-  - platform: gpio
-    pin:
-      number: GPIO14
-      mode: INPUT_PULLUP
-      inverted: True
-    name: "Door wall push switch"
+      - light.toggle: light_relay
 
-switch:
+output:
   - platform: gpio
-    name: "Bedroom Ceiling 1 Relay"
     pin: GPIO12
     id: relay
+
+light:
+  - platform: binary
+    name: "Lane Upper Flood"
+    output: relay
+    id: light_relay
 
 status_led:
   pin:
