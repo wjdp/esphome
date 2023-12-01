@@ -1,0 +1,4 @@
+- To compile `pipx run esphome compile <filename>.yaml`
+- To upload `pipx run esphome upload <filename>.yaml`
+- To monitor `pipx run esphome logs <filename>.yaml`
+- To run (compile, upload & monitor) `pipx run esphome run <filename>.yaml`

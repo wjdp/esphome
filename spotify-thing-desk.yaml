@@ -1,0 +1,31 @@
+esphome:
+  name: spotify-thing-desk
+  board: esp8285
+  platform: ESP8266
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: spotify-thing-desk.pimblett.me.uk
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  password: !secret ota_password
+
+logger:
+  level: DEBUG
+
+switch:
+  - platform: gpio
+    name: "Spotify Car Thing Desk"
+    pin: GPIO12
+    id: relay
+
+status_led:
+  pin:
+    number: GPIO13
+    inverted: yes
