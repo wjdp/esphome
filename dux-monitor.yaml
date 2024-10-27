@@ -28,3 +28,5 @@ light:
     pin: GPIO2
     num_leds: 74
     name: "Dux Monitor Ambient Light"
+    default_transition_length: 200ms
+    restore_mode: RESTORE_DEFAULT_OFF
