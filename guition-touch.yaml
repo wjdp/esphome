@@ -1,0 +1,908 @@
+esphome:
+  name: "guition-esp32-s3-4848s040"
+  friendly_name: "4848s040"
+
+esp32:
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+    on_begin:
+      - light.turn_off:
+          id: display_backlight
+          transition_length: 0s
+      - lambda: "id(display_backlight).loop();"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+switch:
+  - platform: gpio
+    name: Relay
+    pin:
+      number: GPIO40
+      inverted: true
+
+output:
+  - platform: ledc
+    id: backlight_output
+    pin: GPIO38
+    frequency: 150Hz
+    min_power: 0.01
+    zero_means_zero: true
+
+light:
+  - platform: monochromatic
+    name: Backlight
+    id: display_backlight
+    output: backlight_output
+    restore_mode: ALWAYS_ON
+    default_transition_length: 1s
+
+spi:
+  - id: lcd_spi
+    clk_pin: GPIO48
+    mosi_pin: GPIO47
+
+i2c:
+  id: touchscreen_bus
+  sda: GPIO19
+  scl:
+    number: 45
+    ignore_strapping_warning: true
+
+display:
+  - platform: st7701s
+    id: tft_display
+    dimensions:
+      width: 480
+      height: 480
+    #    rotation: 270    #uncomment for placement with down-facing USB socket
+    spi_mode: MODE3
+    data_rate: 2MHz
+    color_order: RGB
+    invert_colors: False
+    cs_pin: 39
+    de_pin: 18
+    hsync_pin: 16
+    vsync_pin: 17
+    pclk_pin: 21
+    pclk_frequency: 12MHz
+    pclk_inverted: False
+    hsync_pulse_width: 8
+    hsync_front_porch: 10
+    hsync_back_porch: 20
+    vsync_pulse_width: 8
+    vsync_front_porch: 10
+    vsync_back_porch: 10
+    update_interval: never
+    auto_clear_enabled: False
+    init_sequence:
+      - 1
+      - [0xFF, 0x77, 0x01, 0x00, 0x00, 0x10] # CMD2_BKSEL_BK0
+      - [0xCD, 0x00] # disable MDT flag
+    data_pins:
+      red: [11, 12, 13, 14, 0]
+      green: [8, 20, 3, 46, 9, 10]
+      blue: [4, 5, 6, 7, 15]
+
+touchscreen:
+  - platform: gt911
+    id: tft_touch
+    display: tft_display
+#    transform:     #uncomment for placement with down-facing USB socket
+#      swap_xy: true
+#      mirror_x: true
+
+# Get time from Home Assistant
+time:
+  - platform: homeassistant
+    id: ha_time
+    timezone: "Europe/London"
+    on_time_sync:
+      then:
+        - lvgl.label.update:
+            id: lbl_time
+            text:
+              time_format: "%H:%M"
+              time: ha_time
+        - lvgl.label.update:
+            id: lbl_date
+            text:
+              time_format: "%A, %d %B"
+              time: ha_time
+    on_time:
+      - seconds: 0
+        then:
+          - lvgl.label.update:
+              id: lbl_time
+              text:
+                time_format: "%H:%M"
+                time: ha_time
+          - lvgl.label.update:
+              id: lbl_date
+              text:
+                time_format: "%A, %d %B"
+                time: ha_time
+
+sensor:
+  - platform: homeassistant
+    id: room_temperature
+    entity_id: sensor.everything_presence_one_d72024_temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_temp_value
+            text:
+              format: "%.1f°C"
+              args: ["x"]
+        - lvgl.label.update:
+            id: lbl_room_temp_value
+            text:
+              format: "%.1f°C"
+              args: ["x"]
+  - platform: homeassistant
+    id: room_humidity
+    entity_id: sensor.everything_presence_one_d72024_humidity
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_room_humidity_value
+            text:
+              format: "%.0f%%"
+              args: ["x"]
+  - platform: homeassistant
+    id: room_illuminance
+    entity_id: sensor.everything_presence_one_d72024_illuminance
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_room_illuminance_value
+            text:
+              format: "%.0f lx"
+              args: ["x"]
+  - platform: homeassistant
+    id: outside_temperature
+    entity_id: sensor.sawston_temperature
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_outside_temp_value
+            text:
+              format: "%.1f°C"
+              args: ["x"]
+
+text_sensor:
+  - platform: homeassistant
+    id: next_alarm
+    entity_id: sensor.caiman_next_alarm
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_alarm_value
+            text: !lambda |-
+              // Parse ISO timestamp (e.g. "2025-12-29T14:30:00")
+              auto pos = x.find('T');
+              if (pos == std::string::npos || x.length() < pos + 6) {
+                return std::string("None");
+              }
+
+              // Get current time
+              auto now = id(ha_time).now();
+              if (!now.is_valid()) {
+                return x.substr(pos + 1, 5);
+              }
+
+              // Parse alarm timestamp components
+              int year = atoi(x.substr(0, 4).c_str());
+              int month = atoi(x.substr(5, 2).c_str());
+              int day = atoi(x.substr(8, 2).c_str());
+              int hour = atoi(x.substr(11, 2).c_str());
+              int minute = atoi(x.substr(14, 2).c_str());
+
+              // Create alarm time struct
+              struct tm alarm_tm = {};
+              alarm_tm.tm_year = year - 1900;
+              alarm_tm.tm_mon = month - 1;
+              alarm_tm.tm_mday = day;
+              alarm_tm.tm_hour = hour;
+              alarm_tm.tm_min = minute;
+              alarm_tm.tm_isdst = -1;
+              time_t alarm_ts = mktime(&alarm_tm);
+
+              // Check if alarm is within next 24 hours
+              time_t diff = alarm_ts - now.timestamp;
+              if (diff >= 0 && diff <= 86400) {
+                return x.substr(pos + 1, 5);
+              }
+
+              return std::string("None");
+
+  - platform: homeassistant
+    id: weather_state
+    entity_id: sensor.sawston_weather
+    on_value:
+      then:
+        - lvgl.label.update:
+            id: lbl_weather_icon
+            text: !lambda |-
+              // Map weather states to MDI icons
+              if (x == "sunny") return "\U000F0599";
+              if (x == "clear-night") return "\U000F0594";
+              if (x == "cloudy") return "\U000F0590";
+              if (x == "partlycloudy") return "\U000F0595";
+              if (x == "rainy") return "\U000F0597";
+              if (x == "pouring") return "\U000F0596";
+              if (x == "snowy") return "\U000F0598";
+              if (x == "snowy-rainy") return "\U000F067F";
+              if (x == "fog") return "\U000F0591";
+              if (x == "hail") return "\U000F0592";
+              if (x == "lightning") return "\U000F0593";
+              if (x == "lightning-rainy") return "\U000F067E";
+              if (x == "windy") return "\U000F059D";
+              if (x == "windy-variant") return "\U000F059E";
+              return "\U000F0590";  // default to cloudy
+
+binary_sensor:
+  - platform: homeassistant
+    id: ikea_gooseneck_state
+    entity_id: light.ikea_gooseneck
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_ikea_gooseneck
+            bg_color: !lambda |-
+              return x ? lv_color_hex(0x4CAF50) : lv_color_hex(0x3A3A3A);
+  - platform: homeassistant
+    id: motion_automation_state
+    entity_id: automation.turn_on_bedroom_when_occupied
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_motion_automation
+            bg_color: !lambda |-
+              return x ? lv_color_hex(0x4CAF50) : lv_color_hex(0x3A3A3A);
+  - platform: homeassistant
+    id: wall_buttons_automation_state
+    entity_id: automation.bedroom_wall_switch_turn_off_bedroom
+    on_state:
+      then:
+        - lvgl.widget.update:
+            id: btn_wall_buttons_automation
+            bg_color: !lambda |-
+              return x ? lv_color_hex(0x4CAF50) : lv_color_hex(0x3A3A3A);
+
+font:
+  - file: "gfonts://Roboto Mono"
+    id: font_time
+    size: 120
+    bpp: 4
+    glyphs: "0123456789:-"
+  - file: "gfonts://Roboto"
+    id: font_date
+    size: 32
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: font_sensors
+    size: 24
+    bpp: 4
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: font_icons
+    size: 28
+    bpp: 4
+    glyphs: [
+        "\U000F050F", # thermometer
+        "\U000F0020", # alarm
+        "\U000F0599", # weather-sunny
+        "\U000F0594", # weather-night
+        "\U000F0590", # weather-cloudy
+        "\U000F0595", # weather-partly-cloudy
+        "\U000F0597", # weather-rainy
+        "\U000F0596", # weather-pouring
+        "\U000F0598", # weather-snowy
+        "\U000F067F", # weather-snowy-rainy
+        "\U000F0591", # weather-fog
+        "\U000F0592", # weather-hail
+        "\U000F0593", # weather-lightning
+        "\U000F067E", # weather-lightning-rainy
+        "\U000F059D", # weather-windy
+        "\U000F059E", # weather-windy-variant
+        "\U000F0335", # lightbulb
+        "\U000F0210", # fan
+        "\U000F0425", # power-plug
+        "\U000F02DC", # home
+        "\U000F068F", # blinds
+        "\U000F0438", # radiator
+        "\U000F040A", # play
+        "\U000F0493", # shield-home
+        "\U000F004D", # arrow-left
+        "\U000F06E8", # ceiling-light
+        "\U000F06B5", # lamp
+        "\U000F05A8", # white-balance-sunny
+        "\U000F0769", # lightbulb-off
+        "\U000F058E", # water-percent (humidity)
+        "\U000F00DE", # brightness-5 (illuminance)
+      ]
+  - file: "https://github.com/Templarian/MaterialDesign-Webfont/raw/master/fonts/materialdesignicons-webfont.ttf"
+    id: font_icons_large
+    size: 36
+    bpp: 4
+    glyphs: [
+        "\U000F0335", # lightbulb
+        "\U000F081A", # door
+        "\U000F040A", # play
+        "\U000F004D", # arrow-left
+        "\U000F06E8", # ceiling-light
+        "\U000F06B5", # lamp
+        "\U000F05A8", # white-balance-sunny
+        "\U000F0769", # lightbulb-off
+        "\U000F1A4C", # night-light
+        "\U000F1A4D", # night-light-minor
+        "\U000F0D91", # motion-sensor
+        "\U000F12A8", # light-switch-off
+      ]
+  - file: "gfonts://Roboto"
+    id: font_button
+    size: 16
+    bpp: 4
+
+lvgl:
+  displays:
+    - tft_display
+  touchscreens:
+    - tft_touch
+  on_idle:
+    timeout: 10s
+    then:
+      - lvgl.page.show: clock_page
+  default_font: font_date
+  style_definitions:
+    - id: style_grid_button
+      width: 140
+      height: 115
+      bg_color: 0x3A3A3A
+      radius: 12
+      shadow_width: 0
+    - id: style_button_label
+      text_font: font_button
+      text_color: 0xE0E0E0
+  pages:
+    - id: clock_page
+      bg_color: 0x000000
+      widgets:
+        - obj:
+            width: 480
+            height: 480
+            align: CENTER
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            on_click:
+              - lvgl.page.show: info_page
+        - label:
+            id: lbl_time
+            align: CENTER
+            y: -30
+            text_font: font_time
+            text_color: 0xFFD700
+            text: "--:--"
+        - label:
+            id: lbl_date
+            align: CENTER
+            y: 60
+            text_color: 0xAAAAAA
+            text: "Waiting for time"
+        - obj:
+            align: CENTER
+            y: 130
+            width: 420
+            height: 40
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            scrollbar_mode: "off"
+            layout:
+              type: FLEX
+              flex_flow: ROW
+              flex_align_main: SPACE_EVENLY
+              flex_align_cross: CENTER
+            widgets:
+              - label:
+                  text_font: font_icons
+                  text_color: 0xFF6B6B
+                  text: "\U000F050F"
+              - label:
+                  id: lbl_temp_value
+                  text_font: font_sensors
+                  text_color: 0xCCCCCC
+                  text: "--.-°C"
+              - label:
+                  id: lbl_weather_icon
+                  text_font: font_icons
+                  text_color: 0xFFAA00
+                  text: "\U000F0590"
+              - label:
+                  id: lbl_outside_temp_value
+                  text_font: font_sensors
+                  text_color: 0xCCCCCC
+                  text: "--.-°C"
+              - label:
+                  text_font: font_icons
+                  text_color: 0x4ECDC4
+                  text: "\U000F0020"
+              - label:
+                  id: lbl_alarm_value
+                  text_font: font_sensors
+                  text_color: 0xCCCCCC
+                  text: "--:--"
+    - id: info_page
+      bg_color: 0x1A1A1A
+      widgets:
+        # 3x3 Grid container
+        - obj:
+            align: TOP_MID
+            y: 16
+            width: 448
+            height: 380
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            pad_all: 0
+            scrollbar_mode: "off"
+            layout:
+              type: GRID
+              grid_columns: [FR(1), FR(1), FR(1)]
+              grid_rows: [FR(1), FR(1), FR(1)]
+            widgets:
+              # Row 1: Lights, Fan, Sockets
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 1
+                  widgets:
+                    - label:
+                        align: TOP_LEFT
+                        x: 12
+                        y: 16
+                        text_font: font_icons_large
+                        text_color: 0xFFD54F
+                        text: "\U000F0335"
+                    - label:
+                        styles: style_button_label
+                        align: BOTTOM_LEFT
+                        x: 12
+                        y: -16
+                        text: "Lights"
+                  on_click:
+                    - lvgl.page.show: lights_page
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  widgets:
+                    - label:
+                        align: TOP_LEFT
+                        x: 12
+                        y: 16
+                        text_font: font_icons_large
+                        text_color: 0x81C784
+                        text: "\U000F081A"
+                    - label:
+                        styles: style_button_label
+                        align: BOTTOM_LEFT
+                        x: 12
+                        y: -16
+                        text: "Room"
+                  on_click:
+                    - lvgl.page.show: room_page
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 2
+                  grid_cell_row_pos: 1
+                  widgets:
+                    - label:
+                        align: TOP_LEFT
+                        x: 12
+                        y: 16
+                        text_font: font_icons_large
+                        text_color: 0x4DD0E1
+                        text: "\U000F040A"
+                    - label:
+                        styles: style_button_label
+                        align: BOTTOM_LEFT
+                        x: 12
+                        y: -16
+                        text: "Media"
+        # Full width back button
+        - button:
+            align: BOTTOM_MID
+            y: -16
+            width: 448
+            height: 56
+            bg_color: 0x2D2D2D
+            radius: 12
+            shadow_width: 0
+            widgets:
+              - label:
+                  align: CENTER
+                  x: -30
+                  text_font: font_icons
+                  text_color: 0xAAAAAA
+                  text: "\U000F004D"
+              - label:
+                  align: CENTER
+                  x: 10
+                  text_font: font_sensors
+                  text_color: 0xAAAAAA
+                  text: "Back"
+            on_click:
+              - lvgl.page.show: clock_page
+    - id: lights_page
+      bg_color: 0x1A1A1A
+      widgets:
+        # 2x3 Grid for scene buttons
+        - obj:
+            align: TOP_MID
+            y: 16
+            width: 448
+            height: 380
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            pad_all: 0
+            scrollbar_mode: "off"
+            layout:
+              type: GRID
+              grid_columns: [FR(1), FR(1)]
+              grid_rows: [FR(1), FR(1), FR(1)]
+            widgets:
+              # Row 1: Day, Evening
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0xFFEB3B
+                        text: "\U000F05A8"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Day"
+                  on_click:
+                    - homeassistant.service:
+                        action: scene.turn_on
+                        data:
+                          entity_id: scene.bedroom_day
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0xFF9800
+                        text: "\U000F0335"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Evening"
+                  on_click:
+                    - homeassistant.service:
+                        action: scene.turn_on
+                        data:
+                          entity_id: scene.bedroom_evening
+              # Row 2: Nightlights
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 1
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0x5C6BC0
+                        text: "\U000F1A4C"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Night Major"
+                  on_click:
+                    - homeassistant.service:
+                        action: scene.turn_on
+                        data:
+                          entity_id: scene.bedroom_nightlight
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 1
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0x3949AB
+                        text: "\U000F1A4D"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Night Minor"
+                  on_click:
+                    - homeassistant.action:
+                        action: scene.turn_on
+                        data:
+                          entity_id: scene.bedroom_nightlight_minor
+              # Row 3: Off, IKEA Gooseneck
+              - button:
+                  styles: style_grid_button
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 2
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0x757575
+                        text: "\U000F0769"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Off"
+                  on_click:
+                    - homeassistant.service:
+                        action: scene.turn_on
+                        data:
+                          entity_id: scene.bedroom_off
+              - button:
+                  id: btn_ikea_gooseneck
+                  styles: style_grid_button
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 2
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0xE0E0E0
+                        text: "\U000F06B5"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Desk Lamp"
+                  on_click:
+                    - homeassistant.service:
+                        action: light.toggle
+                        data:
+                          entity_id: light.ikea_gooseneck
+        # Full width back button
+        - button:
+            align: BOTTOM_MID
+            y: -16
+            width: 448
+            height: 56
+            bg_color: 0x2D2D2D
+            radius: 12
+            shadow_width: 0
+            widgets:
+              - label:
+                  align: CENTER
+                  x: -30
+                  text_font: font_icons
+                  text_color: 0xAAAAAA
+                  text: "\U000F004D"
+              - label:
+                  align: CENTER
+                  x: 10
+                  text_font: font_sensors
+                  text_color: 0xAAAAAA
+                  text: "Back"
+            on_click:
+              - lvgl.page.show: info_page
+    - id: room_page
+      bg_color: 0x1A1A1A
+      widgets:
+        # Automation toggle buttons
+        - obj:
+            align: TOP_MID
+            y: 16
+            width: 448
+            height: 130
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            pad_all: 0
+            scrollbar_mode: "off"
+            layout:
+              type: GRID
+              grid_columns: [FR(1), FR(1)]
+              grid_rows: [FR(1)]
+            widgets:
+              - button:
+                  id: btn_motion_automation
+                  styles: style_grid_button
+                  grid_cell_column_pos: 0
+                  grid_cell_row_pos: 0
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0xE0E0E0
+                        text: "\U000F0D91"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Motion"
+                  on_click:
+                    - homeassistant.service:
+                        action: automation.toggle
+                        data:
+                          entity_id: automation.turn_on_bedroom_when_occupied
+              - button:
+                  id: btn_wall_buttons_automation
+                  styles: style_grid_button
+                  grid_cell_column_pos: 1
+                  grid_cell_row_pos: 0
+                  width: 214
+                  height: 115
+                  widgets:
+                    - label:
+                        align: LEFT_MID
+                        x: 16
+                        text_font: font_icons_large
+                        text_color: 0xE0E0E0
+                        text: "\U000F12A8"
+                    - label:
+                        styles: style_button_label
+                        align: RIGHT_MID
+                        x: -16
+                        text: "Wall Buttons"
+                  on_click:
+                    - homeassistant.service:
+                        action: automation.toggle
+                        data:
+                          entity_id: automation.bedroom_wall_switch_turn_off_bedroom
+        # Sensor displays
+        - obj:
+            align: CENTER
+            y: 20
+            width: 448
+            height: 200
+            bg_opa: TRANSP
+            border_opa: TRANSP
+            scrollbar_mode: "off"
+            layout:
+              type: FLEX
+              flex_flow: COLUMN
+              flex_align_main: SPACE_EVENLY
+              flex_align_cross: CENTER
+            widgets:
+              # Temperature
+              - obj:
+                  width: 400
+                  height: 50
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  scrollbar_mode: "off"
+                  layout:
+                    type: FLEX
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                  widgets:
+                    - label:
+                        text_font: font_icons
+                        text_color: 0xFF5252
+                        text: "\U000F050F"
+                    - label:
+                        id: lbl_room_temp_value
+                        text_font: font_sensors
+                        text_color: 0xFF5252
+                        text: "--.-°C"
+                        pad_left: 12
+              # Humidity
+              - obj:
+                  width: 400
+                  height: 50
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  scrollbar_mode: "off"
+                  layout:
+                    type: FLEX
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                  widgets:
+                    - label:
+                        text_font: font_icons
+                        text_color: 0x00BCD4
+                        text: "\U000F058E"
+                    - label:
+                        id: lbl_room_humidity_value
+                        text_font: font_sensors
+                        text_color: 0x00BCD4
+                        text: "--%"
+                        pad_left: 12
+              # Illuminance
+              - obj:
+                  width: 400
+                  height: 50
+                  bg_opa: TRANSP
+                  border_opa: TRANSP
+                  scrollbar_mode: "off"
+                  layout:
+                    type: FLEX
+                    flex_flow: ROW
+                    flex_align_main: CENTER
+                    flex_align_cross: CENTER
+                  widgets:
+                    - label:
+                        text_font: font_icons
+                        text_color: 0xFFEB3B
+                        text: "\U000F00DE"
+                    - label:
+                        id: lbl_room_illuminance_value
+                        text_font: font_sensors
+                        text_color: 0xFFEB3B
+                        text: "-- lx"
+                        pad_left: 12
+        # Full width back button
+        - button:
+            align: BOTTOM_MID
+            y: -16
+            width: 448
+            height: 56
+            bg_color: 0x2D2D2D
+            radius: 12
+            shadow_width: 0
+            widgets:
+              - label:
+                  align: CENTER
+                  x: -30
+                  text_font: font_icons
+                  text_color: 0xAAAAAA
+                  text: "\U000F004D"
+              - label:
+                  align: CENTER
+                  x: 10
+                  text_font: font_sensors
+                  text_color: 0xAAAAAA
+                  text: "Back"
+            on_click:
+              - lvgl.page.show: info_page
